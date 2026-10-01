@@ -1,0 +1,3 @@
+{"id": "factorial_mid", "prefix": "def factorial(n):\n    if n == 0:\n        return 1\n", "suffix": "", "tests": "assert factorial(0) == 1\nassert factorial(5) == 120\nassert factorial(3) == 6"}
+{"id": "max_of_list", "prefix": "def my_max(nums):\n    best = nums[0]\n", "suffix": "    return best\n", "tests": "assert my_max([3, 1, 4, 1, 5]) == 5\nassert my_max([-1, -2]) == -1"}
+{"id": "count_up", "prefix": "def count_up(n):\n    result = []\n", "suffix": "    return result\n", "tests": "assert count_up(3) == [1, 2, 3]\nassert count_up(0) == []"}

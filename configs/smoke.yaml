@@ -1,0 +1,64 @@
+# Tiny CPU smoke config: exercises the whole chain without a GPU or the gated
+# dataset. Uses pre-seeded data/dedup/*.jsonl. NOT a real experiment.
+experiment: smoke
+seed: 42
+
+model:
+  base: HuggingFaceTB/SmolLM2-135M
+  seq_len: 128
+
+data:
+  source: codeparrot
+  language: Python
+  general_source: fineweb-edu
+  train_tokens: 1500
+  eval_heldout_files: 5
+  overshoot: 3.0
+  raw_dir: data/raw
+  clean_dir: data/clean
+  dedup_dir: data/dedup
+  general_dir: data/general
+  heldout_dir: data/eval_heldout
+  cache_dir: data/cache
+
+clean:
+  min_lines: 2
+  max_lines: 20000
+  max_line_length: 1000
+  max_avg_line_length: 100
+  min_alpha_ratio: 0.20
+  max_non_ascii_ratio: 0.20
+  require_parse: true
+  drop_markers: ["@generated", "do not edit"]
+
+dedup:
+  exact: true
+  near: true
+  near_threshold: 0.85
+  num_perm: 64
+
+train:
+  variant: python
+  lr: 5.0e-5
+  epochs: 1
+  warmup_ratio: 0.0
+  weight_decay: 0.0
+  per_device_batch_size: 1
+  grad_accum: 1
+  precision: bf16
+  lr_scheduler: constant
+  logging_steps: 1
+  save_steps: 1000
+  save_total_limit: 1
+  gradient_checkpointing: false
+  runs_dir: runs
+
+eval:
+  problems_file: eval/problems/problems.jsonl
+  completion_file: eval/problems/completion.jsonl
+  fim_file: eval/problems/fim.jsonl
+  max_new_tokens: 64
+  temperature: 0.0
+  num_samples: 1
+  timeout_sec: 10
+  results_dir: eval/results

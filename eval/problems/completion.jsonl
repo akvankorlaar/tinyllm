@@ -1,0 +1,4 @@
+{"id": "fibonacci", "prompt": "def fibonacci(n):\n    if n <= 1:\n        return n\n", "expect": ["fibonacci(n - 1)", "fibonacci(n - 2)"]}
+{"id": "factorial", "prompt": "def factorial(n):\n    if n == 0:\n        return 1\n", "expect": ["return", "factorial(n - 1)"]}
+{"id": "list_comprehension", "prompt": "def squares(n):\n    return [", "expect": ["for", "range(n)"]}
+{"id": "open_file", "prompt": "def read_lines(path):\n    with open(path", "expect": ["readlines"]}

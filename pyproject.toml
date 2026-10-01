@@ -1,0 +1,28 @@
+[project]
+name = "tinypython"
+version = "0.1.0"
+description = "Experiment 1: SmolLM2-135M Python specialization via continued pretraining"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "transformers>=4.44",
+    "datasets>=2.20",
+    "accelerate>=0.33",
+    "tokenizers>=0.19",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "numpy>=1.26",
+    # The Stack v2 content fetch (Software Heritage S3)
+    "boto3>=1.34",
+    "smart_open[s3]>=7.0",
+    # Near-duplicate detection
+    "datasketch>=1.6",
+]
+
+[tool.uv]
+# This repo is a set of scripts, not an installable package.
+package = false
+# torch resolves to a CPU wheel by default. For a CUDA GPU box, install the
+# matching wheel instead, e.g.:
+#   uv pip install torch --index-url https://download.pytorch.org/whl/cu121

@@ -1,0 +1,25 @@
+# Data artifacts (regenerate from the pipeline)
+data/raw/
+data/clean/
+data/dedup/
+data/general/
+data/eval_heldout/
+data/cache/
+
+# Training outputs
+runs/
+*.ckpt
+*.pt
+
+# Eval outputs
+eval/results/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Misc
+.DS_Store
