@@ -1,81 +1,71 @@
 # tinypython
 
-**Experiment 1 — SmolLM2-135M Python specialization.**
+**The best Python LM we can get at ~20M parameters, trained from scratch on a laptop.**
 
-One question: *can ~30M carefully selected Python tokens make a 135M
-general-purpose model substantially better at Python?*
+A `MistralForCausalLM` (18.9M params) with its own 16k byte-level BPE
+tokenizer, pretrained on ~400M tokens of cleaned Python from
+`bigcode/starcoderdata`. No pretrained weights; every component is ours.
 
-This repo is deliberately boring. No tokenizer changes, no architecture
-changes, no new loss, no RL, no distillation. Just clean data + continued
-causal-LM pretraining + a small execution-based benchmark.
+Why from scratch: there is no good open-source code model at this size, and
+reusing a general tokenizer (e.g. SmolLM2's 49k vocab) would spend most of a
+20M budget on embeddings. A Python-only 16k vocab costs 6.3M params and
+leaves the rest for the transformer.
 
-## Scientific design
+## Model
 
-Same 30M-token budget for each trained variant, so any difference is the data,
-not the compute:
-
-| Model | Training |
+| | |
 |---|---|
-| **A** | original SmolLM2-135M (no training) |
-| **B** | base + 30M **general** tokens (control) |
-| **C** | base + 30M **Python** tokens (treatment) |
+| architecture | `MistralForCausalLM` (RoPE, RMSNorm, SwiGLU, GQA), random init |
+| size | 8 layers, hidden 384, FFN 1024, 6 heads / 2 KV heads, tied embeddings = **18.9M params** |
+| tokenizer | byte-level BPE, 16,384 vocab, fit on the training corpus |
+| context | 512 tokens |
+| data | ~400M tokens (~21 tokens/param, ≈ Chinchilla-optimal) |
+| compute | 6 × 18.9M × 400M ≈ 4.5 × 10¹⁶ FLOPs ≈ **3.6 h on an M4 Max (MPS)** |
 
-All three run against the same held-out Python benchmark.
-
-- `C > B > A` → Python specialization helps. Keep going.
-- `C ≈ B` → data recipe isn't good enough.
-- `C < A` → also informative (catastrophic forgetting / bad data).
+All of it is set in `configs/tiny_20m.yaml`.
 
 ## Benchmark
 
+- **Held-out bits/byte** — the main metric. Files held out before any
+  training. Unlike perplexity, bits/byte is tokenizer-independent, so you can
+  compare against any HF model (e.g. `HuggingFaceTB/SmolLM2-135M`).
 - **A. Completion** (`eval/completion.py`) — continue a prefix; surface signal.
-- **B. Fill-in-the-middle** (`eval/fim.py`) — infill a hole, then execute.
+- **B. Fill-in-the-middle** (`eval/fim.py`) — prefix-continuation fallback, then execute.
 - **C. Execute** (`eval/execute.py`) — solve a problem, run against hidden
-  tests. **This is the one that matters.** Pretty nonsense that doesn't run fails.
-- Plus held-out **perplexity** on Python the model never trained on.
+  tests. At 20M params expect few passes; the problem set is tiny (8).
 
 ## Layout
 
 ```
-data/     download.py  clean.py  deduplicate.py  common.py
+data/     download.py  clean.py  deduplicate.py  tokenizer.py  common.py
 model/    train.py
 eval/     completion.py  fim.py  execute.py  run.py  compare.py  common_eval.py
           problems/{problems,completion,fim}.jsonl
-configs/  experiment_001.yaml
-scripts/  run_pipeline.sh
+configs/  tiny_20m.yaml  smoke.yaml
+scripts/  run_pipeline.sh  smoke.sh
 ```
 
-Everything is driven by `configs/experiment_001.yaml`.
-
-## Setup (uv)
+## Setup
 
 ```bash
 uv sync
 ```
 
-`torch` resolves to a CPU wheel by default. On a CUDA box, install the matching
-wheel: `uv pip install torch --index-url https://download.pytorch.org/whl/cu121`.
+Training uses MPS (Apple GPU) or CUDA when available, CPU otherwise.
 
-### Data source
-
-Default is `data.source: starcoderdata` — inline content, **no AWS**, already
-cleaned/deduped/filtered. Setup:
-
-1. Accept the gate (instant) at
-   <https://huggingface.co/datasets/bigcode/starcoderdata>.
-2. `uv run hf auth login` (paste a read token).
-
-Other sources (set `data.source`):
-
-- `the-stack-v2-dedup` — Stack v2's scale, but metadata-only on HF; content
-  comes from the Software Heritage S3 bucket, so it also needs AWS creds
-  (`uv run aws configure`, any free account). Gate:
-  <https://huggingface.co/datasets/bigcode/the-stack-v2-dedup>.
-- `codeparrot` — no gate, but script-based; may not load under datasets 5.x.
+Data: accept the (instant) gate at
+<https://huggingface.co/datasets/bigcode/starcoderdata>, then
+`uv run hf auth login` with a read token.
 
 ## Run
 
-Full pipeline (data + eval need no GPU; training does):
+Offline smoke test (stdlib as corpus, ~1 minute, no HF login):
+
+```bash
+bash scripts/smoke.sh
+```
+
+Full pipeline:
 
 ```bash
 bash scripts/run_pipeline.sh
@@ -84,18 +74,11 @@ bash scripts/run_pipeline.sh
 Or step by step:
 
 ```bash
-uv run python data/download.py    configs/experiment_001.yaml --corpus python
-uv run python data/download.py    configs/experiment_001.yaml --corpus general
-uv run python data/clean.py       configs/experiment_001.yaml --corpus python
-uv run python data/deduplicate.py configs/experiment_001.yaml --corpus python
-# ... general too, then:
-uv run python model/train.py      configs/experiment_001.yaml --variant python
-uv run python eval/run.py         configs/experiment_001.yaml --model runs/experiment_001_python --name C_python
-uv run python eval/compare.py     configs/experiment_001.yaml
+uv run python data/download.py    configs/tiny_20m.yaml   # starcoderdata -> raw + held-out
+uv run python data/clean.py       configs/tiny_20m.yaml   # drop generated/minified/unparseable
+uv run python data/deduplicate.py configs/tiny_20m.yaml   # exact (+ optional MinHash) dedup
+uv run python data/tokenizer.py   configs/tiny_20m.yaml   # fit BPE, encode to uint16 .bin
+uv run python model/train.py      configs/tiny_20m.yaml   # -> runs/tiny_20m
+uv run python eval/run.py         configs/tiny_20m.yaml --model runs/tiny_20m --name tiny_20m
+uv run python eval/compare.py     configs/tiny_20m.yaml
 ```
-
-## Compute
-
-30M tokens × 135M params × ~6 FLOPs/token ≈ **2.4 × 10¹⁶ FLOPs**. One modern GPU
-is plenty; prioritize fast iteration over utilization. There is no GPU on the
-dev box — build and test the pipeline here, train on a rented/remote GPU.

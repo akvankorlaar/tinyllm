@@ -2,9 +2,10 @@
 data/raw/
 data/clean/
 data/dedup/
-data/general/
 data/eval_heldout/
-data/cache/
+data/tokenizer/
+data/tokens/
+data/smoke/
 
 # Training outputs
 runs/

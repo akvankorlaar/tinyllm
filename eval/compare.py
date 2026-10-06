@@ -1,10 +1,11 @@
-"""Compare model result JSONs (A / B / C) and print a markdown table.
+"""Compare model result JSONs and print a markdown table.
 
-  python eval/compare.py configs/experiment_001.yaml
-  python eval/compare.py configs/experiment_001.yaml A_base B_general C_python
+  python eval/compare.py configs/tiny_20m.yaml
+  python eval/compare.py configs/tiny_20m.yaml tiny_20m smollm2_135m
 
 With no names given, compares every *.json in eval.results_dir.
-Verdict: C > B > A means Python specialization helped beyond the token budget.
+Compare held-out quality across tokenizers with bits/byte (lower is better);
+perplexity is only comparable between models sharing a tokenizer.
 """
 from __future__ import annotations
 
@@ -40,8 +41,9 @@ def main() -> None:
     if not rows:
         raise SystemExit(f"no result JSONs in {rdir}; run eval/run.py first")
 
-    header = "| model | execute pass@1 | completion match | fim pass@1 | heldout ppl |"
-    sep =    "|---|---|---|---|---|"
+    header = ("| model | execute pass@1 | completion match | fim pass@1 "
+              "| heldout bits/byte | heldout ppl |")
+    sep = "|---|---|---|---|---|---|"
     print(header)
     print(sep)
     for r in rows:
@@ -53,6 +55,7 @@ def main() -> None:
               f"| {_fmt(c.get('score'), pct=True)} "
               f"| {_fmt(a.get('match_rate'), pct=True)} "
               f"| {_fmt(b.get('score'), pct=True)} "
+              f"| {_fmt(pp.get('bits_per_byte'))} "
               f"| {_fmt(pp.get('perplexity'))} |")
 
 

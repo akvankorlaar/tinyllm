@@ -1,10 +1,10 @@
 """Benchmark B: fill-in-the-middle.
 
 If the tokenizer exposes FIM sentinels (<fim_prefix>/<fim_suffix>/<fim_middle>),
-we do real infilling. SmolLM2-135M base was not trained with FIM, so we fall
-back to prefix-continuation: generate from the prefix, then assemble
-`prefix + generation + suffix` and execute. The fallback is weaker by design;
-the point is to see whether Python specialization moves the needle on it.
+we do real infilling. Our tokenizer has no FIM sentinels (training is plain
+causal LM), so we fall back to prefix-continuation: generate from the prefix,
+then assemble `prefix + generation + suffix` and execute. The fallback is
+weaker by design.
 
 Each item: prefix, suffix, hidden tests. Assembled program is run sandboxed.
 """

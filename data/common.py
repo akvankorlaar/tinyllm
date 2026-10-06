@@ -13,10 +13,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_config(path: str | os.PathLike) -> dict[str, Any]:
-    """Load a YAML config. Relative paths inside it resolve against REPO_ROOT."""
+    """Load a YAML config. Resolve relative paths inside it with resolve()."""
     with open(path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-    return cfg
+        return yaml.safe_load(f)
 
 
 def resolve(path: str | os.PathLike) -> Path:
@@ -51,17 +50,3 @@ def read_jsonl(path: str | os.PathLike) -> Iterator[dict]:
             line = line.strip()
             if line:
                 yield json.loads(line)
-
-
-def iter_jsonl_dir(directory: str | os.PathLike) -> Iterator[dict]:
-    """Yield objects from every .jsonl / .jsonl.gz file in a directory."""
-    directory = resolve(directory)
-    for p in sorted(directory.glob("*.jsonl*")):
-        yield from read_jsonl(p)
-
-
-def count_records(path_or_dir: str | os.PathLike) -> int:
-    p = resolve(path_or_dir)
-    if p.is_dir():
-        return sum(1 for _ in iter_jsonl_dir(p))
-    return sum(1 for _ in read_jsonl(p))

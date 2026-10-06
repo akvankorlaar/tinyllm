@@ -13,7 +13,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def device() -> str:
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def load(model_path: str):

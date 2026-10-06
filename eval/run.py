@@ -1,11 +1,12 @@
-"""Run the full Experiment 1 benchmark on ONE model, write a results JSON.
+"""Run the full benchmark on ONE model, write a results JSON.
 
-  python eval/run.py configs/experiment_001.yaml \
-      --model HuggingFaceTB/SmolLM2-135M --name A_base
-  python eval/run.py configs/experiment_001.yaml \
-      --model runs/experiment_001_python --name C_python
+  python eval/run.py configs/tiny_20m.yaml --model runs/tiny_20m --name tiny_20m
+  python eval/run.py configs/tiny_20m.yaml \
+      --model HuggingFaceTB/SmolLM2-135M --name smollm2_135m   # reference point
 
-Benchmarks: A completion, B fim, C execute, plus held-out perplexity.
+Benchmarks: A completion, B fim, C execute, plus held-out perplexity and
+bits-per-byte. Perplexity depends on the tokenizer; bits-per-byte does not,
+so use bpb to compare models with different tokenizers.
 """
 from __future__ import annotations
 
@@ -33,32 +34,36 @@ def load_items(path: Path) -> list[dict]:
 
 
 @torch.no_grad()
-def heldout_perplexity(tok, model, cfg, max_tokens: int = 200_000) -> dict:
+def heldout_perplexity(tok, model, cfg) -> dict:
     d = cfg["data"]
     hp = resolve(d["heldout_dir"]) / "python_heldout.jsonl"
     if not hp.exists():
         return {"available": False}
     seq_len = cfg["model"]["seq_len"]
+    max_tokens = cfg["eval"]["perplexity_tokens"]
     eos = tok.eos_token_id
     buf: list[int] = []
     total_nll = 0.0
     total_tok = 0
+    seen_bytes = seen_tok = 0  # for this tokenizer's bytes/token on held-out text
     for rec in read_jsonl(hp):
         ids = tok(rec["content"], add_special_tokens=False)["input_ids"] + [eos]
+        seen_bytes += len(rec["content"].encode("utf-8"))
+        seen_tok += len(ids)
         buf.extend(ids)
-        while len(buf) >= seq_len:
+        while len(buf) >= seq_len and total_tok < max_tokens:
             block = torch.tensor([buf[:seq_len]], device=device())
             buf = buf[seq_len:]
             out = model(block, labels=block)
             total_nll += out.loss.item() * (seq_len - 1)
             total_tok += seq_len - 1
-            if total_tok >= max_tokens:
-                ppl = math.exp(total_nll / total_tok)
-                return {"available": True, "tokens": total_tok, "perplexity": ppl}
+        if total_tok >= max_tokens:
+            break
     if total_tok == 0:
         return {"available": False}
-    return {"available": True, "tokens": total_tok,
-            "perplexity": math.exp(total_nll / total_tok)}
+    nll = total_nll / total_tok
+    return {"available": True, "tokens": total_tok, "perplexity": math.exp(nll),
+            "bits_per_byte": nll / math.log(2) * seen_tok / seen_bytes}
 
 
 def main() -> None:
@@ -94,7 +99,8 @@ def main() -> None:
     print(f"\n=== {args.name} ({args.model}) ===")
     pp = summary["perplexity"]
     if pp.get("available"):
-        print(f"held-out perplexity : {pp['perplexity']:.2f}  ({pp['tokens']} tok)")
+        print(f"held-out perplexity : {pp['perplexity']:.2f}  "
+              f"bits/byte {pp['bits_per_byte']:.3f}  ({pp['tokens']} tok)")
     if summary["C_execute"]:
         c = summary["C_execute"]
         print(f"C execute  {c['metric']} : {c['passed']}/{c['n']} = {c['score']:.3f}")

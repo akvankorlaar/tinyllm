@@ -1,16 +1,12 @@
-"""Clean raw text: drop generated/vendored/minified/broken files.
+"""Clean raw Python: drop generated/vendored/minified/broken files.
 
-Python rules (corpus=python):
   - must parse as Python 3 (ast.parse) if clean.require_parse
   - reject generated/vendored markers, huge/tiny files, minified lines,
     low alphanumeric ratio, heavy non-ASCII
 
-General rules (corpus=general): length / encoding sanity only.
-
 Usage
 -----
-  python data/clean.py configs/experiment_001.yaml --corpus python
-  python data/clean.py configs/experiment_001.yaml --corpus general
+  python data/clean.py configs/tiny_20m.yaml
 """
 from __future__ import annotations
 
@@ -35,7 +31,7 @@ def non_ascii_ratio(s: str) -> float:
     return sum(ord(c) > 127 for c in s) / len(s)
 
 
-def reason_reject_python(content: str, cfg: dict) -> str | None:
+def reason_reject(content: str, cfg: dict) -> str | None:
     c = cfg["clean"]
     lines = content.splitlines()
     n = len(lines)
@@ -68,28 +64,12 @@ def reason_reject_python(content: str, cfg: dict) -> str | None:
     return None
 
 
-def reason_reject_general(content: str, cfg: dict) -> str | None:
-    c = cfg["clean"]
-    if len(content) < 200:
-        return "too_short"
-    if non_ascii_ratio(content) > c["max_non_ascii_ratio"]:
-        return "non_ascii"
-    return None
-
-
-def clean_corpus(cfg: dict, corpus: str) -> None:
+def clean_corpus(cfg: dict) -> None:
     d = cfg["data"]
-    if corpus == "python":
-        src = resolve(d["raw_dir"]) / "python.jsonl"
-        out = resolve(d["clean_dir"]) / "python.jsonl"
-        reject = reason_reject_python
-    else:
-        src = resolve(d["general_dir"]) / "general.jsonl"
-        out = resolve(d["clean_dir"]) / "general.jsonl"
-        reject = reason_reject_general
-
+    src = resolve(d["raw_dir"]) / "python.jsonl"
+    out = resolve(d["clean_dir"]) / "python.jsonl"
     if not src.exists():
-        raise SystemExit(f"missing input {src}; run download.py --corpus {corpus} first")
+        raise SystemExit(f"missing input {src}; run download.py first")
 
     stats: Counter = Counter()
     buf = []
@@ -97,9 +77,9 @@ def clean_corpus(cfg: dict, corpus: str) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     # truncate output
     write_jsonl(out, [])
-    for rec in tqdm(read_jsonl(src), desc=f"clean {corpus}", unit="file"):
+    for rec in tqdm(read_jsonl(src), desc="clean", unit="file"):
         content = rec.get("content", "")
-        r = reject(content, cfg)
+        r = reason_reject(content, cfg)
         if r is not None:
             stats[r] += 1
             continue
@@ -113,7 +93,7 @@ def clean_corpus(cfg: dict, corpus: str) -> None:
         write_jsonl(out, buf, append=True)
 
     total = sum(stats.values())
-    print(f"\ncleaned {corpus}: kept {kept}/{total} -> {out}")
+    print(f"\ncleaned: kept {kept}/{total} -> {out}")
     for k, v in stats.most_common():
         print(f"  {k:18s} {v}")
 
@@ -121,10 +101,8 @@ def clean_corpus(cfg: dict, corpus: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("config")
-    ap.add_argument("--corpus", choices=["python", "general"], default="python")
     args = ap.parse_args()
-    cfg = load_config(args.config)
-    clean_corpus(cfg, args.corpus)
+    clean_corpus(load_config(args.config))
 
 
 if __name__ == "__main__":

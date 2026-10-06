@@ -1,33 +1,28 @@
 #!/usr/bin/env bash
-# Experiment 1, end to end. Run from the repo root.
+# Full pipeline, end to end. Run from the repo root.
 #   bash scripts/run_pipeline.sh
-# Assumes `uv sync` has been run and (for the-stack-v2-dedup) HF gate accepted
-# + AWS creds configured. Training needs a GPU; the data/eval steps do not.
+# Assumes `uv sync` has been run and the starcoderdata gate is accepted
+# (uv run hf auth login).
 set -euo pipefail
-CFG=configs/experiment_001.yaml
+CFG=configs/tiny_20m.yaml
 
 echo "==> 1. download Python corpus (+ held-out eval split)"
-uv run python data/download.py "$CFG" --corpus python
+uv run python data/download.py "$CFG"
 
-echo "==> 2. download general corpus (control for model B)"
-uv run python data/download.py "$CFG" --corpus general
+echo "==> 2. clean"
+uv run python data/clean.py "$CFG"
 
-echo "==> 3. clean"
-uv run python data/clean.py "$CFG" --corpus python
-uv run python data/clean.py "$CFG" --corpus general
+echo "==> 3. deduplicate"
+uv run python data/deduplicate.py "$CFG"
 
-echo "==> 4. deduplicate"
-uv run python data/deduplicate.py "$CFG" --corpus python
-uv run python data/deduplicate.py "$CFG" --corpus general
+echo "==> 4. fit tokenizer + encode corpus"
+uv run python data/tokenizer.py "$CFG"
 
-echo "==> 5. train C (python) and B (general)   [needs GPU]"
-uv run python model/train.py "$CFG" --variant python
-uv run python model/train.py "$CFG" --variant general
+echo "==> 5. train"
+uv run python model/train.py "$CFG"
 
-echo "==> 6. evaluate A (base), B (general), C (python)"
-uv run python eval/run.py "$CFG" --model HuggingFaceTB/SmolLM2-135M --name A_base
-uv run python eval/run.py "$CFG" --model runs/experiment_001_general   --name B_general
-uv run python eval/run.py "$CFG" --model runs/experiment_001_python    --name C_python
+echo "==> 6. evaluate"
+uv run python eval/run.py "$CFG" --model runs/tiny_20m --name tiny_20m
 
 echo "==> 7. compare"
 uv run python eval/compare.py "$CFG"

@@ -7,7 +7,7 @@ Near : 5-gram MinHash + LSH at dedup.near_threshold Jaccard. Drops files that
 
 Usage
 -----
-  python data/deduplicate.py configs/experiment_001.yaml --corpus python
+  python data/deduplicate.py configs/tiny_20m.yaml
 """
 from __future__ import annotations
 
@@ -33,14 +33,13 @@ def shingles(content: str, k: int = 5) -> set[str]:
     return {" ".join(toks[i : i + k]) for i in range(len(toks) - k + 1)}
 
 
-def dedup(cfg: dict, corpus: str) -> None:
+def dedup(cfg: dict) -> None:
     d = cfg["data"]
     dd = cfg["dedup"]
-    name = "python.jsonl" if corpus == "python" else "general.jsonl"
-    src = resolve(d["clean_dir"]) / name
-    out = resolve(d["dedup_dir"]) / name
+    src = resolve(d["clean_dir"]) / "python.jsonl"
+    out = resolve(d["dedup_dir"]) / "python.jsonl"
     if not src.exists():
-        raise SystemExit(f"missing input {src}; run clean.py --corpus {corpus} first")
+        raise SystemExit(f"missing input {src}; run clean.py first")
 
     # --- exact ---
     seen: set[str] = set()
@@ -77,17 +76,15 @@ def dedup(cfg: dict, corpus: str) -> None:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     write_jsonl(out, kept)
-    print(f"\ndedup {corpus}: in {n_in} -> exact {n_exact} -> near {len(kept)}")
+    print(f"\ndedup: in {n_in} -> exact {n_exact} -> near {len(kept)}")
     print(f"  -> {out}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("config")
-    ap.add_argument("--corpus", choices=["python", "general"], default="python")
     args = ap.parse_args()
-    cfg = load_config(args.config)
-    dedup(cfg, args.corpus)
+    dedup(load_config(args.config))
 
 
 if __name__ == "__main__":
