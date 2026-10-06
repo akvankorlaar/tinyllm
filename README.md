@@ -26,21 +26,32 @@ All of it is set in `configs/tiny_20m.yaml`.
 
 ## Benchmark
 
-- **Held-out bits/byte** — the main metric. Files held out before any
-  training. Unlike perplexity, bits/byte is tokenizer-independent, so you can
-  compare against any HF model (e.g. `HuggingFaceTB/SmolLM2-135M`).
-- **A. Completion** (`eval/completion.py`) — continue a prefix; surface signal.
-- **B. Fill-in-the-middle** (`eval/fim.py`) — prefix-continuation fallback, then execute.
-- **C. Execute** (`eval/execute.py`) — solve a problem, run against hidden
-  tests. At 20M params expect few passes; the problem set is tiny (8).
+599 executable problems (`eval/problems/`, sources and licenses in
+[SOURCES.md](eval/problems/SOURCES.md)): HumanEval (164), MBPP sanitized
+(427, rewritten as signature + docstring prompts) and 8 handwritten.
+
+| Metric | What it measures |
+|---|---|
+| **held-out bits/byte** | how well the model predicts Python it never trained on. Files come from held-out *repositories*, so no repo is in both train and eval. |
+| **solution bits/byte** | how well the model predicts each problem's reference solution given its prompt. Near-zero pass rates make this the most useful task metric at 20M. |
+| **pass@1** per suite | completion cut at the end of the function body, executed against hidden tests in a resource-limited subprocess |
+| **fim pass@1** | one line of a reference solution blanked; the model writes it from the prefix (our tokenizer has no FIM tokens); executed. ~1% passes by luck. |
+| completion match | surface check on 4 prefixes |
+
+Bits/byte does not depend on the tokenizer, so compare against any HF model
+(e.g. `HuggingFaceTB/SmolLM2-135M`) with it; perplexity only between models
+that share a tokenizer. A full eval takes ~2 minutes; `--limit N` runs N items
+per suite. Rebuild the problem files with `eval/build_benchmark.py` (fetches
+from GitHub).
 
 ## Layout
 
 ```
 data/     download.py  clean.py  deduplicate.py  tokenizer.py  common.py
 model/    train.py
-eval/     completion.py  fim.py  execute.py  run.py  compare.py  common_eval.py
-          problems/{problems,completion,fim}.jsonl
+eval/     run.py  compare.py  execute.py  fim.py  completion.py  common_eval.py
+          build_benchmark.py
+          problems/{handwritten,humaneval,mbpp,fim,completion}.jsonl
 configs/  tiny_20m.yaml  smoke.yaml
 scripts/  run_pipeline.sh  smoke.sh
 ```
@@ -82,3 +93,23 @@ uv run python model/train.py      configs/tiny_20m.yaml   # -> runs/tiny_20m
 uv run python eval/run.py         configs/tiny_20m.yaml --model runs/tiny_20m --name tiny_20m
 uv run python eval/compare.py     configs/tiny_20m.yaml
 ```
+
+## Training on a remote GPU
+
+The pipeline is the same on a Linux CUDA box; the PyPI `torch` wheel there
+already includes CUDA.
+
+```bash
+git clone https://github.com/akvankorlaar/tinyllm.git && cd tinyllm
+uv sync
+uv run hf auth login                  # starcoderdata gate
+bash scripts/run_pipeline.sh          # download -> ... -> train -> eval
+```
+
+- Set `train.torch_compile: true` for extra speed on CUDA.
+- On a big GPU, raise `train.per_device_batch_size` and lower `grad_accum` to
+  keep the same tokens per step (batch x accum x seq_len, now 131k).
+- Checkpoints are written every `save_steps`; after an interruption, continue
+  with `uv run python model/train.py configs/tiny_20m.yaml --resume`.
+- Bring back `runs/tiny_20m/` (the final model + tokenizer, ~80 MB) and
+  `eval/results/`; checkpoints in `runs/tiny_20m/checkpoint-*` can stay.

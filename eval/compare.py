@@ -19,10 +19,10 @@ sys.path.insert(0, str(REPO_ROOT / "data"))
 from common import load_config, resolve  # noqa: E402
 
 
-def _fmt(x, pct=False):
+def _fmt(x, pct=False, digits=2):
     if x is None:
         return "-"
-    return f"{x*100:.1f}%" if pct else f"{x:.2f}"
+    return f"{x*100:.1f}%" if pct else f"{x:.{digits}f}"
 
 
 def main() -> None:
@@ -41,22 +41,22 @@ def main() -> None:
     if not rows:
         raise SystemExit(f"no result JSONs in {rdir}; run eval/run.py first")
 
-    header = ("| model | execute pass@1 | completion match | fim pass@1 "
-              "| heldout bits/byte | heldout ppl |")
-    sep = "|---|---|---|---|---|---|"
-    print(header)
-    print(sep)
+    suites = list(cfg["eval"]["suites"])
+    cols = (["heldout bits/byte", "solution bits/byte"] + [f"{s} pass@1" for s in suites]
+            + ["fim pass@1", "completion match", "heldout ppl"])
+    print("| model | " + " | ".join(cols) + " |")
+    print("|---" * (len(cols) + 1) + "|")
     for r in rows:
-        c = r.get("C_execute") or {}
-        a = r.get("A_completion") or {}
-        b = r.get("B_fim") or {}
+        ex = r.get("execute") or {}
         pp = r.get("perplexity") or {}
-        print(f"| {r['name']} "
-              f"| {_fmt(c.get('score'), pct=True)} "
-              f"| {_fmt(a.get('match_rate'), pct=True)} "
-              f"| {_fmt(b.get('score'), pct=True)} "
-              f"| {_fmt(pp.get('bits_per_byte'))} "
-              f"| {_fmt(pp.get('perplexity'))} |")
+        name = r["name"] + (f" (limit {r['limit']})" if r.get("limit") else "")
+        vals = ([_fmt(pp.get("bits_per_byte"), digits=3),
+                 _fmt(r.get("solution_bits_per_byte"), digits=3)]
+                + [_fmt((ex.get(s) or {}).get("score"), pct=True) for s in suites]
+                + [_fmt((r.get("fim") or {}).get("score"), pct=True),
+                   _fmt((r.get("completion") or {}).get("match_rate"), pct=True),
+                   _fmt(pp.get("perplexity"))])
+        print(f"| {name} | " + " | ".join(vals) + " |")
 
 
 if __name__ == "__main__":

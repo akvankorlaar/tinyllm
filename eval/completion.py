@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 import re
 
-from common_eval import generate
+from common_eval import end_of_body, generate
 from tqdm import tqdm
 
 _WS = re.compile(r"\s+")
@@ -28,7 +28,9 @@ def run_completions(tok, model, cfg, items: list[dict]) -> dict:
     n_pass = 0
     n_parse = 0
     for it in tqdm(items, desc="completion", unit="item"):
-        gen = generate(tok, model, it["prompt"], e["max_new_tokens"], e["temperature"])
+        gen = generate(tok, model, it["prompt"], e["max_new_tokens"], e["temperature"],
+                       stop=lambda t: end_of_body(t) < len(t))
+        gen = gen[: end_of_body(gen)]
         gnorm = _norm(gen)
         hit = all(_norm(x) in gnorm for x in it["expect"])
         try:

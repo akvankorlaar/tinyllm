@@ -1,13 +1,20 @@
 """Shared eval helpers: load a model, generate text, run code safely."""
 from __future__ import annotations
 
+import math
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    StoppingCriteria,
+    StoppingCriteriaList,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -31,41 +38,87 @@ def load(model_path: str):
     return tok, model
 
 
+def context_len(model) -> int:
+    return model.config.max_position_embeddings
+
+
+_DEDENT = re.compile(r"\n(?=\S)")
+
+
+def end_of_body(text: str) -> int:
+    """Index where a function body ends: the first line not indented."""
+    m = _DEDENT.search(text)
+    return m.start() if m else len(text)
+
+
+class _StopAt(StoppingCriteria):
+    """Stop once `done(generated_text)` is true (checked every step)."""
+
+    def __init__(self, tok, n_prompt: int, done):
+        self.tok, self.n_prompt, self.done = tok, n_prompt, done
+
+    def __call__(self, input_ids, scores, **kwargs) -> torch.BoolTensor:
+        done = self.done(self.tok.decode(input_ids[0, self.n_prompt:], skip_special_tokens=True))
+        return torch.full((input_ids.shape[0],), done, dtype=torch.bool, device=input_ids.device)
+
+
 @torch.no_grad()
-def generate(tok, model, prompt: str, max_new_tokens: int, temperature: float) -> str:
-    """Return only the newly generated text (prompt stripped)."""
-    inputs = tok(prompt, return_tensors="pt").to(device())
+def generate(tok, model, prompt: str, max_new_tokens: int, temperature: float,
+             stop=None) -> str:
+    """Return only the newly generated text (prompt stripped).
+
+    The prompt is left-truncated so prompt + generation fits the model's
+    context. `stop(text) -> bool` ends generation early.
+    """
+    ids = tok(prompt, return_tensors="pt", add_special_tokens=False)["input_ids"]
+    ctx = context_len(model)
+    max_new_tokens = min(max_new_tokens, ctx // 2)
+    ids = ids[:, -(ctx - max_new_tokens):].to(device())
     do_sample = temperature and temperature > 0
     out = model.generate(
-        **inputs,
+        input_ids=ids,
+        attention_mask=torch.ones_like(ids),
         max_new_tokens=max_new_tokens,
         do_sample=do_sample,
         temperature=temperature if do_sample else None,
         pad_token_id=tok.pad_token_id,
+        stopping_criteria=StoppingCriteriaList([_StopAt(tok, ids.shape[1], stop)]) if stop else None,
     )
-    gen = out[0][inputs["input_ids"].shape[1]:]
-    return tok.decode(gen, skip_special_tokens=True)
+    return tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True)
 
 
-def extract_code(text: str) -> str:
-    """Strip markdown fences if the model emitted them."""
-    if "```" in text:
-        parts = text.split("```")
-        # take first fenced block
-        block = parts[1]
-        if block.startswith("python"):
-            block = block[len("python"):]
-        return block
-    return text
+@torch.no_grad()
+def continuation_bits(tok, model, prompt: str, continuation: str) -> tuple[float, int]:
+    """Bits the model needs to encode `continuation` given `prompt`.
+
+    Returns (total bits, continuation bytes); bits/bytes is tokenizer-free.
+    Prompt and continuation are tokenized separately so the boundary is exact.
+    """
+    p = tok(prompt, add_special_tokens=False)["input_ids"]
+    c = tok(continuation, add_special_tokens=False)["input_ids"]
+    ctx = context_len(model)
+    if len(c) > ctx - 1:
+        c = c[:ctx - 1]
+        continuation = tok.decode(c)
+    p = p[-(ctx - len(c)):] if len(p) + len(c) > ctx else p
+    ids = torch.tensor([p + c], device=device())
+    logits = model(ids).logits[0, len(p) - 1 : -1].float()
+    nll = torch.nn.functional.cross_entropy(logits, ids[0, len(p):], reduction="sum")
+    return nll.item() / math.log(2), len(continuation.encode("utf-8"))
 
 
 # --------------------------------------------------------------------------- #
 # Sandboxed execution: run candidate code + asserts in a locked-down subprocess.
 # --------------------------------------------------------------------------- #
+# Each limit is best-effort: macOS rejects RLIMIT_AS, which must not abort the
+# program (that would fail every candidate regardless of the code).
 _LIMITS = """
 import resource, sys
-resource.setrlimit(resource.RLIMIT_CPU, ({cpu}, {cpu}))
-resource.setrlimit(resource.RLIMIT_AS, ({mem}, {mem}))
+for _lim, _val in ((resource.RLIMIT_CPU, {cpu}), (resource.RLIMIT_AS, {mem})):
+    try:
+        resource.setrlimit(_lim, (_val, _val))
+    except (ValueError, OSError):
+        pass
 sys.setrecursionlimit(10000)
 """
 

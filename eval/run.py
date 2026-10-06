@@ -4,9 +4,14 @@
   python eval/run.py configs/tiny_20m.yaml \
       --model HuggingFaceTB/SmolLM2-135M --name smollm2_135m   # reference point
 
-Benchmarks: A completion, B fim, C execute, plus held-out perplexity and
-bits-per-byte. Perplexity depends on the tokenizer; bits-per-byte does not,
-so use bpb to compare models with different tokenizers.
+Benchmarks:
+  - held-out perplexity and bits/byte on Python never trained on
+  - execute: pass@1 on each suite in eval.suites (handwritten, humaneval,
+    mbpp), plus bits/byte of each reference solution given its prompt
+  - fim: single-line infilling, executed
+  - completion: continue a prefix; surface signal
+Perplexity depends on the tokenizer; bits/byte does not, so use bits/byte to
+compare models with different tokenizers. --limit N runs N items per suite.
 """
 from __future__ import annotations
 
@@ -70,25 +75,38 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("config")
     ap.add_argument("--model", required=True, help="HF id or local run dir")
-    ap.add_argument("--name", required=True, help="label, e.g. A_base / C_python")
+    ap.add_argument("--name", required=True, help="label, e.g. tiny_20m")
+    ap.add_argument("--limit", type=int, default=None, help="max items per suite (quick runs)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     e = cfg["eval"]
     tok, model = load(args.model)
 
-    problems = load_items(resolve(e["problems_file"]))
-    completions = load_items(resolve(e["completion_file"]))
-    fims = load_items(resolve(e["fim_file"]))
+    def items(path: str) -> list[dict]:
+        return load_items(resolve(path))[: args.limit]
+
+    execute = {}
+    for suite, path in e["suites"].items():
+        problems = items(path)
+        if problems:
+            execute[suite] = run_problems(tok, model, cfg, problems, desc=suite)
+    fims = items(e["fim_file"])
+    completions = items(e["completion_file"])
 
     summary = {
         "name": args.name,
         "model": args.model,
         "device": device(),
+        "limit": args.limit,
         "perplexity": heldout_perplexity(tok, model, cfg),
-        "A_completion": run_completions(tok, model, cfg, completions) if completions else None,
-        "B_fim": run_fim(tok, model, cfg, fims) if fims else None,
-        "C_execute": run_problems(tok, model, cfg, problems) if problems else None,
+        "solution_bits_per_byte": (
+            sum(r["solution_bits"] for r in execute.values())
+            / max(sum(r["solution_bytes"] for r in execute.values()), 1)
+        ) if execute else None,
+        "execute": execute,
+        "fim": run_fim(tok, model, cfg, fims) if fims else None,
+        "completion": run_completions(tok, model, cfg, completions) if completions else None,
     }
 
     out_dir = resolve(e["results_dir"])
@@ -101,15 +119,17 @@ def main() -> None:
     if pp.get("available"):
         print(f"held-out perplexity : {pp['perplexity']:.2f}  "
               f"bits/byte {pp['bits_per_byte']:.3f}  ({pp['tokens']} tok)")
-    if summary["C_execute"]:
-        c = summary["C_execute"]
-        print(f"C execute  {c['metric']} : {c['passed']}/{c['n']} = {c['score']:.3f}")
-    if summary["A_completion"]:
-        a = summary["A_completion"]
-        print(f"A complete match_rate: {a['match_rate']:.3f}  parse_rate {a['parse_rate']:.3f}")
-    if summary["B_fim"]:
-        b = summary["B_fim"]
-        print(f"B fim[{b['mode']}] : {b['passed']}/{b['n']} = {b['score']:.3f}")
+    if summary["solution_bits_per_byte"] is not None:
+        print(f"solution bits/byte  : {summary['solution_bits_per_byte']:.3f}")
+    for suite, c in execute.items():
+        print(f"execute {suite:11s} {c['metric']}: {c['passed']}/{c['n']} = {c['score']:.3f}")
+    if summary["fim"]:
+        b = summary["fim"]
+        print(f"fim[{b['mode']}] : {b['passed']}/{b['n']} = {b['score']:.3f}  "
+              f"exact {b['exact_match']:.3f}")
+    if summary["completion"]:
+        a = summary["completion"]
+        print(f"completion match_rate: {a['match_rate']:.3f}  parse_rate {a['parse_rate']:.3f}")
     print(f"-> {out}")
 
 

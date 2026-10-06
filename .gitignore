@@ -6,6 +6,7 @@ data/eval_heldout/
 data/tokenizer/
 data/tokens/
 data/smoke/
+data/benchmark_src/
 
 # Training outputs
 runs/

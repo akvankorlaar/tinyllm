@@ -27,6 +27,8 @@ data:
 
   train_tokens: 2000000
   eval_heldout_files: 50
+  heldout_repo_fraction: 0.01    # share of repos held out entirely (by name hash)
+  heldout_files_per_repo: 20     # cap per held-out repo, for repo diversity
 
   overshoot: 1.5
 
@@ -74,7 +76,10 @@ train:
   runs_dir: runs
 
 eval:
-  problems_file: eval/problems/problems.jsonl
+  suites:                        # execute-and-test problem sets
+    handwritten: eval/problems/handwritten.jsonl
+    humaneval: eval/problems/humaneval.jsonl
+    mbpp: eval/problems/mbpp.jsonl
   completion_file: eval/problems/completion.jsonl
   fim_file: eval/problems/fim.jsonl
   max_new_tokens: 64

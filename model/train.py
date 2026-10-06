@@ -7,6 +7,7 @@ or CPU, whichever is available.
 
 Entry point:
   python model/train.py configs/tiny_20m.yaml
+  python model/train.py configs/tiny_20m.yaml --resume   # from last checkpoint
 """
 from __future__ import annotations
 
@@ -87,6 +88,8 @@ def build_model(m: dict, tok) -> MistralForCausalLM:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("config")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue from the last checkpoint in the run dir")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -134,11 +137,12 @@ def main() -> None:
         seed=cfg["seed"],
         dataloader_num_workers=0,
         dataloader_pin_memory=torch.cuda.is_available(),  # unsupported on MPS
+        torch_compile=t.get("torch_compile", False),
     )
     trainer = Trainer(model=model, args=targs, train_dataset=train_ds, eval_dataset=eval_ds)
 
     print(f"precision: bf16={bf16} fp16={fp16} (device {targs.device})")
-    trainer.train()
+    trainer.train(resume_from_checkpoint=True if args.resume else None)
     trainer.save_model(str(out_dir))
     tok.save_pretrained(str(out_dir))
     print(f"saved -> {out_dir}")

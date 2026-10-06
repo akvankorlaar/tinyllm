@@ -31,7 +31,9 @@ data:
   # Training tokens, measured by our tokenizer. ~20 tokens/param is
   # Chinchilla-optimal for 19M params; overtraining a small model still helps.
   train_tokens: 400000000
-  eval_heldout_files: 2000      # held out BEFORE any training, never trained on
+  eval_heldout_files: 2000      # held-out files kept for perplexity
+  heldout_repo_fraction: 0.01    # share of repos held out entirely (by name hash)
+  heldout_files_per_repo: 20     # cap per held-out repo, for repo diversity
 
   # Download overshoot: collect this multiple of train_tokens (raw, pre-clean),
   # because cleaning + dedup throw some away.
@@ -75,13 +77,17 @@ train:
   grad_accum: 8                  # 32 x 8 x 512 = 131k tokens / optimizer step
   max_grad_norm: 1.0
   precision: bf16                # bf16 on MPS/CUDA when supported, else fp32
+  torch_compile: false           # true speeds up CUDA; leave false on MPS
   logging_steps: 20
   save_steps: 500
   save_total_limit: 2
   runs_dir: runs
 
 eval:
-  problems_file: eval/problems/problems.jsonl
+  suites:                        # execute-and-test problem sets
+    handwritten: eval/problems/handwritten.jsonl
+    humaneval: eval/problems/humaneval.jsonl
+    mbpp: eval/problems/mbpp.jsonl
   completion_file: eval/problems/completion.jsonl
   fim_file: eval/problems/fim.jsonl
   max_new_tokens: 256
