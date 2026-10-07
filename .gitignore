@@ -25,3 +25,4 @@ venv/
 
 # Misc
 .DS_Store
+logs/

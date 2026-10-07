@@ -1,16 +1,17 @@
-# tinypython: a ~20M-parameter Python LM trained from scratch, locally.
-# Reproduce end to end with scripts/run_pipeline.sh (or the steps in README).
+# tinypython: a ~10M-parameter Python LM trained from scratch, locally.
+# Sized for a 4 GB GTX 1650 (~3.8 h); configs/tiny_20m.yaml is the 19M variant
+# for bigger hardware. Reproduce end to end with scripts/run_pipeline.sh.
 
-experiment: tiny_20m
+experiment: tiny_10m
 seed: 42
 
 model:
-  # MistralForCausalLM, randomly initialized. ~19M params with these settings
-  # (embeddings tied: 16384 x 384 = 6.3M; 8 layers x 1.57M = 12.6M).
-  hidden_size: 384
-  intermediate_size: 1024
+  # MistralForCausalLM, randomly initialized. ~10.1M params with these settings
+  # (embeddings tied: 16384 x 256 = 4.2M; 8 layers x 0.74M = 5.9M).
+  hidden_size: 256
+  intermediate_size: 704
   num_hidden_layers: 8
-  num_attention_heads: 6
+  num_attention_heads: 4         # head_dim 64
   num_key_value_heads: 2         # grouped-query attention
   seq_len: 512
   rope_theta: 10000.0
@@ -29,8 +30,8 @@ data:
   language: Python
 
   # Training tokens, measured by our tokenizer. ~20 tokens/param is
-  # Chinchilla-optimal for 19M params; overtraining a small model still helps.
-  train_tokens: 400000000
+  # Chinchilla-optimal for 10M params; overtraining a small model still helps.
+  train_tokens: 200000000
   eval_heldout_files: 2000      # held-out files kept for perplexity
   heldout_repo_fraction: 0.01    # share of repos held out entirely (by name hash)
   heldout_files_per_repo: 20     # cap per held-out repo, for repo diversity
@@ -71,15 +72,15 @@ dedup:
 train:
   lr: 2.0e-3
   min_lr_ratio: 0.1              # cosine decays to lr * min_lr_ratio
-  warmup_steps: 200
+  warmup_steps: 100              # of ~1525 optimizer steps
   weight_decay: 0.1
-  per_device_batch_size: 32
-  grad_accum: 8                  # 32 x 8 x 512 = 131k tokens / optimizer step
+  per_device_batch_size: 8       # fp32 bs8 peaks ~1.6 GB on the 1650
+  grad_accum: 32                 # 8 x 32 x 512 = 131k tokens / optimizer step
   max_grad_norm: 1.0
-  precision: bf16                # bf16 on MPS/CUDA when supported, else fp32
+  precision: bf16                # bf16 on MPS / CUDA sm_80+, else fp32
   torch_compile: false           # true speeds up CUDA; leave false on MPS
   logging_steps: 20
-  save_steps: 500
+  save_steps: 250
   save_total_limit: 2
   runs_dir: runs
 

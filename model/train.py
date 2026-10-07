@@ -60,7 +60,10 @@ def pick_precision(requested: str) -> tuple[bool, bool]:
     if requested != "bf16":
         return False, False
     if torch.cuda.is_available():
-        return (True, False) if torch.cuda.is_bf16_supported() else (False, True)
+        # Pre-Ampere GPUs emulate bf16 (slower than fp32) and run fp16 slowly
+        # without tensor cores (e.g. GTX 1650), so stay in fp32 there.
+        native_bf16 = torch.cuda.get_device_capability()[0] >= 8
+        return (True, False) if native_bf16 else (False, False)
     if torch.backends.mps.is_available():
         return True, False
     return False, False  # CPU: fp32

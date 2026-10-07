@@ -1,14 +1,14 @@
 # tinypython
 
-**The best Python LM we can get at ~20M parameters, trained from scratch on a laptop.**
+**The best Python LM we can get at ~10M parameters, trained from scratch on a laptop.**
 
-A `MistralForCausalLM` (18.9M params) with its own 16k byte-level BPE
-tokenizer, pretrained on ~400M tokens of cleaned Python from
+A `MistralForCausalLM` (10.1M params) with its own 16k byte-level BPE
+tokenizer, pretrained on ~200M tokens of cleaned Python from
 `bigcode/starcoderdata`. No pretrained weights; every component is ours.
 
 Why from scratch: there is no good open-source code model at this size, and
 reusing a general tokenizer (e.g. SmolLM2's 49k vocab) would spend most of a
-20M budget on embeddings. A Python-only 16k vocab costs 6.3M params and
+10M budget on embeddings. A Python-only 16k vocab costs 4.2M params and
 leaves the rest for the transformer.
 
 ## Model
@@ -16,13 +16,15 @@ leaves the rest for the transformer.
 | | |
 |---|---|
 | architecture | `MistralForCausalLM` (RoPE, RMSNorm, SwiGLU, GQA), random init |
-| size | 8 layers, hidden 384, FFN 1024, 6 heads / 2 KV heads, tied embeddings = **18.9M params** |
+| size | 8 layers, hidden 256, FFN 704, 4 heads / 2 KV heads, tied embeddings = **10.1M params** |
 | tokenizer | byte-level BPE, 16,384 vocab, fit on the training corpus |
 | context | 512 tokens |
-| data | ~400M tokens (~21 tokens/param, ≈ Chinchilla-optimal) |
-| compute | 6 × 18.9M × 400M ≈ 4.5 × 10¹⁶ FLOPs ≈ **3.6 h on an M4 Max (MPS)** |
+| data | ~200M tokens (~20 tokens/param, ≈ Chinchilla-optimal) |
+| compute | 6 × 10.1M × 200M ≈ 1.2 × 10¹⁶ FLOPs ≈ **3.8 h on a GTX 1650 (4 GB, fp32, ~14.5k tok/s)** |
 
-All of it is set in `configs/tiny_20m.yaml`.
+All of it is set in `configs/tiny_10m.yaml`. `configs/tiny_20m.yaml` is a
+19M variant (hidden 384, FFN 1024, 6 heads, 400M tokens) for bigger hardware:
+~3.6 h on an M4 Max, ~12 h on the GTX 1650.
 
 ## Benchmark
 
@@ -33,7 +35,7 @@ All of it is set in `configs/tiny_20m.yaml`.
 | Metric | What it measures |
 |---|---|
 | **held-out bits/byte** | how well the model predicts Python it never trained on. Files come from held-out *repositories*, so no repo is in both train and eval. |
-| **solution bits/byte** | how well the model predicts each problem's reference solution given its prompt. Near-zero pass rates make this the most useful task metric at 20M. |
+| **solution bits/byte** | how well the model predicts each problem's reference solution given its prompt. Near-zero pass rates make this the most useful task metric at this size. |
 | **pass@1** per suite | completion cut at the end of the function body, executed against hidden tests in a resource-limited subprocess |
 | **fim pass@1** | one line of a reference solution blanked; the model writes it from the prefix (our tokenizer has no FIM tokens); executed. ~1% passes by luck. |
 | completion match | surface check on 4 prefixes |
@@ -52,7 +54,7 @@ model/    train.py
 eval/     run.py  compare.py  execute.py  fim.py  completion.py  common_eval.py
           build_benchmark.py
           problems/{handwritten,humaneval,mbpp,fim,completion}.jsonl
-configs/  tiny_20m.yaml  smoke.yaml
+configs/  tiny_10m.yaml  tiny_20m.yaml  smoke.yaml
 scripts/  run_pipeline.sh  smoke.sh
 ```
 
@@ -62,7 +64,9 @@ scripts/  run_pipeline.sh  smoke.sh
 uv sync
 ```
 
-Training uses MPS (Apple GPU) or CUDA when available, CPU otherwise.
+Training uses MPS (Apple GPU) or CUDA when available, CPU otherwise. bf16 is
+used on MPS and CUDA sm_80+; older CUDA GPUs train in fp32 (their bf16 is
+emulated and slower).
 
 Data: accept the (instant) gate at
 <https://huggingface.co/datasets/bigcode/starcoderdata>, then
@@ -79,19 +83,20 @@ bash scripts/smoke.sh
 Full pipeline:
 
 ```bash
-bash scripts/run_pipeline.sh
+bash scripts/run_pipeline.sh                          # configs/tiny_10m.yaml
+bash scripts/run_pipeline.sh configs/tiny_20m.yaml    # the 19M variant
 ```
 
 Or step by step:
 
 ```bash
-uv run python data/download.py    configs/tiny_20m.yaml   # starcoderdata -> raw + held-out
-uv run python data/clean.py       configs/tiny_20m.yaml   # drop generated/minified/unparseable
-uv run python data/deduplicate.py configs/tiny_20m.yaml   # exact (+ optional MinHash) dedup
-uv run python data/tokenizer.py   configs/tiny_20m.yaml   # fit BPE, encode to uint16 .bin
-uv run python model/train.py      configs/tiny_20m.yaml   # -> runs/tiny_20m
-uv run python eval/run.py         configs/tiny_20m.yaml --model runs/tiny_20m --name tiny_20m
-uv run python eval/compare.py     configs/tiny_20m.yaml
+uv run python data/download.py    configs/tiny_10m.yaml   # starcoderdata -> raw + held-out
+uv run python data/clean.py       configs/tiny_10m.yaml   # drop generated/minified/unparseable
+uv run python data/deduplicate.py configs/tiny_10m.yaml   # exact (+ optional MinHash) dedup
+uv run python data/tokenizer.py   configs/tiny_10m.yaml   # fit BPE, encode to uint16 .bin
+uv run python model/train.py      configs/tiny_10m.yaml   # -> runs/tiny_10m
+uv run python eval/run.py         configs/tiny_10m.yaml --model runs/tiny_10m --name tiny_10m
+uv run python eval/compare.py     configs/tiny_10m.yaml
 ```
 
 ## Training on a remote GPU
@@ -110,6 +115,6 @@ bash scripts/run_pipeline.sh          # download -> ... -> train -> eval
 - On a big GPU, raise `train.per_device_batch_size` and lower `grad_accum` to
   keep the same tokens per step (batch x accum x seq_len, now 131k).
 - Checkpoints are written every `save_steps`; after an interruption, continue
-  with `uv run python model/train.py configs/tiny_20m.yaml --resume`.
-- Bring back `runs/tiny_20m/` (the final model + tokenizer, ~80 MB) and
-  `eval/results/`; checkpoints in `runs/tiny_20m/checkpoint-*` can stay.
+  with `uv run python model/train.py configs/tiny_10m.yaml --resume`.
+- Bring back `runs/tiny_10m/` (the final model + tokenizer, ~40 MB) and
+  `eval/results/`; checkpoints in `runs/tiny_10m/checkpoint-*` can stay.
