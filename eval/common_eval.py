@@ -69,8 +69,22 @@ def generate(tok, model, prompt: str, max_new_tokens: int, temperature: float,
 
     The prompt is left-truncated so prompt + generation fits the model's
     context. `stop(text) -> bool` ends generation early.
+
+    Trailing whitespace is cut from the prompt before encoding: BPE merges a
+    newline with the next line's indent, so a prompt ending in a bare "\n"
+    is a token boundary the model never sees in training (it then emits a
+    blank line and ends the function). The returned text still continues
+    the original `prompt`.
     """
-    ids = tok(prompt, return_tensors="pt", add_special_tokens=False)["input_ids"]
+    base = prompt.rstrip()
+    tail = prompt[len(base):]
+
+    def after_prompt(text: str) -> str:
+        if text.startswith(tail):
+            return text[len(tail):]
+        return "" if tail.startswith(text) else text
+
+    ids = tok(base, return_tensors="pt", add_special_tokens=False)["input_ids"]
     ctx = context_len(model)
     max_new_tokens = min(max_new_tokens, ctx // 2)
     ids = ids[:, -(ctx - max_new_tokens):].to(device())
@@ -82,9 +96,10 @@ def generate(tok, model, prompt: str, max_new_tokens: int, temperature: float,
         do_sample=do_sample,
         temperature=temperature if do_sample else None,
         pad_token_id=tok.pad_token_id,
-        stopping_criteria=StoppingCriteriaList([_StopAt(tok, ids.shape[1], stop)]) if stop else None,
+        stopping_criteria=StoppingCriteriaList(
+            [_StopAt(tok, ids.shape[1], lambda t: stop(after_prompt(t)))]) if stop else None,
     )
-    return tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True)
+    return after_prompt(tok.decode(out[0][ids.shape[1]:], skip_special_tokens=True))
 
 
 @torch.no_grad()
@@ -93,7 +108,11 @@ def continuation_bits(tok, model, prompt: str, continuation: str) -> tuple[float
 
     Returns (total bits, continuation bytes); bits/bytes is tokenizer-free.
     Prompt and continuation are tokenized separately so the boundary is exact.
+    The prompt's trailing whitespace moves into the continuation (see
+    `generate`), so the boundary falls where BPE would put one.
     """
+    base = prompt.rstrip()
+    prompt, continuation = base, prompt[len(base):] + continuation
     p = tok(prompt, add_special_tokens=False)["input_ids"]
     c = tok(continuation, add_special_tokens=False)["input_ids"]
     ctx = context_len(model)
