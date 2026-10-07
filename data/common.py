@@ -12,10 +12,24 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def load_config(path: str | os.PathLike) -> dict[str, Any]:
-    """Load a YAML config. Resolve relative paths inside it with resolve()."""
+    """Load a YAML config. Resolve relative paths inside it with resolve().
+
+    A top-level `base: <path>` (relative to the repo root) loads that config
+    first and deep-merges this one over it.
+    """
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    if "base" in cfg:
+        cfg = _merge(load_config(resolve(cfg.pop("base"))), cfg)
+    return cfg
 
 
 def resolve(path: str | os.PathLike) -> Path:

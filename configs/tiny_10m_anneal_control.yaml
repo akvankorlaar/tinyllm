@@ -1,0 +1,8 @@
+# Annealing test, control arm: same as tiny_10m_anneal_quality.yaml but on
+# randomly drawn, unfiltered files (data/quality/control.bin).
+
+base: configs/tiny_10m_anneal_quality.yaml
+experiment: tiny_10m_anneal_control
+
+data:
+  train_bin: data/quality/control.bin

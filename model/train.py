@@ -8,6 +8,10 @@ or CPU, whichever is available.
 Entry point:
   python model/train.py configs/tiny_20m.yaml
   python model/train.py configs/tiny_20m.yaml --resume   # from last checkpoint
+
+`data.train_bin` overrides the training stream (default
+<tokens_dir>/train.bin). `train.init_from` starts from a trained model dir
+instead of random init, with a fresh optimizer and LR schedule.
 """
 from __future__ import annotations
 
@@ -100,12 +104,17 @@ def main() -> None:
     m, d, t = cfg["model"], cfg["data"], cfg["train"]
 
     tokens_dir = resolve(d["tokens_dir"])
-    train_bin, heldout_bin = tokens_dir / "train.bin", tokens_dir / "heldout.bin"
+    train_bin = resolve(d.get("train_bin", tokens_dir / "train.bin"))
+    heldout_bin = tokens_dir / "heldout.bin"
     if not train_bin.exists():
-        raise SystemExit(f"missing {train_bin}; run data/tokenizer.py first")
+        raise SystemExit(f"missing {train_bin}; run data/tokenizer.py (or data/quality.py) first")
 
     tok = PreTrainedTokenizerFast.from_pretrained(str(resolve(cfg["tokenizer"]["dir"])))
-    model = build_model(m, tok)
+    if t.get("init_from"):
+        model = MistralForCausalLM.from_pretrained(str(resolve(t["init_from"])))
+        print(f"init from {resolve(t['init_from'])}")
+    else:
+        model = build_model(m, tok)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"model: MistralForCausalLM, {n_params/1e6:.1f}M params")
 

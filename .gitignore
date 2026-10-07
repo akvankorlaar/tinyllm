@@ -5,6 +5,7 @@ data/dedup/
 data/eval_heldout/
 data/tokenizer/
 data/tokens/
+data/quality/
 data/smoke/
 data/benchmark_src/
 

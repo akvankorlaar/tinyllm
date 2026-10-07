@@ -1,0 +1,26 @@
+# Annealing test, quality arm: continue runs/tiny_10m for 30M tokens on
+# function-rich, documented files (data/quality.py) with a short rewarm and
+# decay. Compare with configs/tiny_10m_anneal_control.yaml, which is the same
+# run on randomly drawn files. Both arms reuse files from the original
+# corpus, so both have seen their data once already: only the mix differs.
+
+base: configs/tiny_10m.yaml
+experiment: tiny_10m_anneal_quality
+
+quality:
+  source: data/dedup/python.jsonl
+  out_dir: data/quality
+  tokens: 30000000               # per stream; ~229 optimizer steps
+  min_func_frac: 0.5             # share of non-blank lines inside functions
+  max_literal_frac: 0.2          # share of lines in big constant literals
+  min_control_per_100: 3         # if/for/while/comprehensions per 100 lines
+  min_docstring_funcs: 1
+
+data:
+  train_bin: data/quality/quality.bin
+
+train:
+  init_from: runs/tiny_10m
+  lr: 5.0e-4                     # rewarm; tiny_10m ended at 2e-4
+  warmup_steps: 20
+  save_steps: 100
